@@ -1,34 +1,41 @@
 (ns clojure.core.matrix.dataset
-  "Namespace for the core.matrix dataset API. Datasets are similar to 2D matrices, except that they support labelled
-   columns and operations on labelled columns."
+  "Namespace for the core.matrix dataset API. 
+
+   Datasets can be considered as 2D matrices, and in addition they support labelled columns and 
+   a set of specialised operations on labelled columns.
+
+   Dataset rows are also labelled by columns.
+   "
   (:require [clojure.core.matrix.protocols :as mp]
             [clojure.core.matrix.impl.dataset :as impl]
             [clojure.core.matrix :refer :all]
-            [clojure.core.matrix.utils :as utils :refer [error]])
+            [clojure.core.matrix.macros :refer [error]]
+            [clojure.core.matrix.utils :as utils])
   (:import [clojure.core.matrix.impl.dataset DataSet]
            [clojure.lang IPersistentVector]
            [java.util List]))
 
 (set! *warn-on-reflection* true)
-(set! *unchecked-math* true)
+(set! *unchecked-math* :warn-on-boxed)
 
 ;; ===============================================================
 ;; Specialised functions for dataset handling
 
 (defn dataset?
-  "Returns true if argument is a dataset, defined as a 2D array with column names"
+  "Returns true if argument is a dataset, defined as a 1D or 2D array with column names"
   (^Boolean [d]
-    (boolean (and (== 2 (mp/dimensionality d)) (mp/column-names d)))))
+    (boolean (and (<= 1 (long (mp/dimensionality d)) 2) 
+                  (mp/column-names d)))))
 
 (defn dataset
-  "Creates dataset from on of the following:
-   1. matrix - its columns will be used as dataset columns.
-   2. seq of rows
-   3. seq of row maps (column names -> values for each row)
-   4. map of columns with associated list of values.
-   5. existing dataset
+  "Creates dataset from one of the following:
+    1. matrix - its columns will be used as dataset columns.
+    2. seq of rows
+    3. seq of row maps (column names -> values for each row)
+    4. map of columns with associated list of values.
+    5. existing dataset
 
-   If column names are provided then they will be used, else incrementing Long values starting from 0, 
+   If column names are provided then they will be used, else incrementing Long values starting from 0,
    i.e. 0, 1, 2, etc will be used as column names"
   ([col-names data]
     (cond
@@ -44,10 +51,10 @@
     (cond
       ;; already a dataset, just return as-is
       (dataset? data) data
-      
+
       ;; construct a dataset using 2D matrix data
       (matrix? data) (impl/dataset-from-array data)
-      
+
       ;; map of names -> columns of elements
       (map? data)
         (let [col-names (keys data)
@@ -81,43 +88,42 @@
               col-names
               (reduce #(conj %1 (get col-map %2)) [] col-names))
             (error "Can't create dataset from incomplete maps")))
-        
-       :else 
+
+       :else
          (error "Don't know how to create dataset from data of type " (class data)))))
 
 (defn column-names
-  "Returns a persistent vector containing column names in the same order as they are placed in the dataset."
+  "Gets the column names from a DataSet, DatsetRiow or labelled array
+
+   Returns a persistent vector containing column names in the same order as they are placed in the dataset.
+   Returns nil if no coklumn names are defined (i.e. the array has no column labels) "
   ([ds]
     (mp/column-names ds)))
 
 (defn column-name
-  "Returns column name at given index. 
+  "Returns column name at given index.
 
    Throws an exception if the index is out of bounds."
   ([ds column-index]
     (mp/column-name ds column-index)))
 
 (defn column-index
-  "Returns column index for a given column name. 
+  "Returns column index for a given column name.
 
-   Returns nil if column name does not exist."
+   Returns nil if the column name does not exist."
   ([ds column-name]
-    (when-let [cnames (mp/column-names ds)]
-      (let [cnames ^IPersistentVector (vec cnames)]
-        (and cnames (utils/find-index cnames column-name))))))
+    (mp/column-index ds column-name)))
 
 (defn column
   "TODO: name may change
 
-   Gets a named column from the dataset. Throws an error if the column does not exist."
+   Gets a named column from the dataset. Throws an error if the column does not exist.
+
+   Works on labelled arrays, datsets or dataset rows."
   ([ds col-name]
-    (if (number? col-name)
-      (get-column ds col-name)
-      (let [cnames (mp/labels ds 1)
-           ix (reduce (fn [i n] (if (= n col-name) (reduced i) (inc i))) 
-                      0 cnames)]
-         (when (>= ix (count cnames)) (error "Column name not found: " col-name))
-         (slice ds 1 ix)))))
+    (if-let [ix (if (number? col-name) col-name (mp/column-index ds col-name) )] 
+      (get-column ds ix)
+      (error "Column name not found: " col-name))))
 
 (defn add-column
   "Adds column to the dataset."
@@ -141,6 +147,15 @@
           selected (filterv (complement col-names) (column-names ds))]
       (mp/select-columns ds selected))))
 
+(defn ^{:deprecated true} except-columns
+  "Returns new dataset with the specified columns removed.
+
+   DEPRECATED: please use remove-columns instead"
+  ([ds col-names]
+    (let [col-names (into #{} col-names)
+          selected (filterv (complement col-names) (column-names ds))]
+      (mp/select-columns ds selected))))
+
 (defn row-maps
   "Returns vector of maps with row values."
   ([ds]
@@ -153,7 +168,7 @@
 
 (defn merge-datasets
   "Returns a dataset created by combining columns of the given datasets. In case of columns with duplicate names, last-one-wins strategy is applied."
-  ([ds1 ds2] 
+  ([ds1 ds2]
     (mp/merge-datasets ds1 ds2))
   ([ds1 ds2 & args]
     (apply merge-datasets (merge-datasets ds1 ds2) args)))
@@ -178,6 +193,20 @@
        (mp/replace-column
          ds col-name
          (apply emap f col args)))))
+
+(defn emap-columns
+  "Applies a function to the specified set of columns. Calls emap-column for each column specified.
+
+   Optionally a map of {column name -> function} may be provided."
+  ([ds col-names f]
+    (reduce (fn [ds col] (emap-column ds col f))
+            ds col-names))
+  ([ds col-names f & args]
+    (reduce (fn [ds col] (apply emap-column ds col f args))
+            ds col-names))
+  ([ds col-fn-map]
+    (reduce (fn [ds [col f]] (emap-column ds col f))
+            ds col-fn-map)))
 
 (defn join-rows
   "Returns a dataset created by combining the rows of the given datasets"

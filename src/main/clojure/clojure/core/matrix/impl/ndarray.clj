@@ -1,13 +1,15 @@
 (ns clojure.core.matrix.impl.ndarray
   (:refer-clojure :exclude [vector?])
   (:require [clojure.walk :as w]
-            [clojure.core.matrix.impl.default]
+            [clojure.core.matrix.impl.defaults]
             [clojure.core.matrix.impl.ndarray-magic :as magic]
             [clojure.core.matrix.protocols :as mp]
             [clojure.core.matrix.implementations :as imp]
             [clojure.core.matrix.impl.mathsops :as mops]
-            [clojure.core.matrix.utils :refer :all]
-            [clojure.core.matrix.impl.ndarray-macro :refer :all]))
+            [clojure.core.matrix.utils :as u]
+            [clojure.core.matrix.impl.ndarray-macro :refer :all]
+            [clojure.core.matrix.macros :refer [error scalar-coerce c-for doseq-indexed]]
+            [clojure.core.matrix.macros-clj :refer [native-array?]]))
 
 ;; (error "NDArray loaded!")
 
@@ -746,7 +748,7 @@
                            row-a 0
                            col-a 0]
                       (if (< row-a nrows)
-                        (if (< col-a ncols) 
+                        (if (< col-a ncols)
                           (if (== (aget data i-a) (aget data-b i-b))
                             (recur (+ i-a step-col-a) (+ i-b step-col-b)
                                    row-a (inc col-a))
@@ -791,7 +793,7 @@
              b-ndims (.ndims b)
              ^ints b-shape (.shape b)]
          (cond
-          (== b-ndims 0) (mp/scale a b)
+          (== b-ndims 0) (mp/scale a (mp/get-0d b))
           (and (== a-ndims 1) (== b-ndims 1))
           (mp/inner-product a b)
           (and (== a-ndims 1) (== b-ndims 2))
@@ -941,8 +943,9 @@
           "add-scaled operates on arrays of equal shape")
         (let [^typename# b (mp/clone m)]
           (loop-over [a b]
-            (aset b-data b-idx (* (type-cast# factor)
-                                  (aget a-data a-idx))))
+            (aset b-data b-idx (+ (aget b-data b-idx)
+                                  (* (type-cast# factor)
+                                    (aget a-data a-idx)))))
           b)))
 
   mp/PAddScaledMutable
@@ -953,8 +956,9 @@
                                                (ints (.shape a)))
           "add-scaled operates on arrays of equal shape")
         (loop-over [m a]
-          (aset m-data m-idx (* (type-cast# factor)
-                                (aget a-data a-idx))))
+          (aset m-data m-idx (+ (aget m-data m-idx)
+                                (* (type-cast# factor)
+                                   (aget a-data a-idx)))))
         m))
 
   mp/PMatrixDivide
@@ -984,34 +988,34 @@
       (let [a (mp/clone m)
             factor (type-cast# factor)]
         (loop-over [a]
-          (aset a-data a-idx (type-cast#
-                              (* (aget a-data a-idx)
-                                 factor))))
+                   (aset a-data a-idx (type-cast#
+                                       (* (aget a-data a-idx)
+                                          factor))))
         a))
     (pre-scale [m factor]
       (let [a (mp/clone m)
             factor (type-cast# factor)]
         (let []
           (loop-over [a]
-           (aset a-data a-idx (type-cast#
-                               (* factor
-                                  (aget a-data a-idx))))))
+                     (aset a-data a-idx (type-cast#
+                                         (* factor
+                                            (aget a-data a-idx))))))
         a))
 
   mp/PMatrixMutableScaling
     (scale! [m factor]
       (let [factor (type-cast# factor)]
         (loop-over [m]
-          (aset m-data m-idx (type-cast#
-                              (* (aget m-data m-idx)
-                                 factor)))))
+                   (aset m-data m-idx (type-cast#
+                                       (* (aget m-data m-idx)
+                                          factor)))))
       m)
     (pre-scale! [m factor]
       (let [factor (type-cast# factor)]
         (loop-over [m]
-         (aset m-data m-idx (type-cast#
-                             (* factor
-                                (aget m-data m-idx))))))
+                   (aset m-data m-idx (type-cast#
+                                       (* factor
+                                          (aget m-data m-idx))))))
       m)
 
   mp/PMatrixAdd

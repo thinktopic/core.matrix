@@ -5,7 +5,7 @@
             clojure.core.matrix.impl.persistent-vector
             [clojure.core.matrix.compliance-tester :as compliance]
             [clojure.core.matrix :refer :all]
-            [clojure.core.matrix.utils :refer [error?]]
+            [clojure.core.matrix.macros-clj :refer [error?]]
             [clojure.core.matrix.protocols :as mp]
             [clojure.test :refer :all]))
 
@@ -135,6 +135,9 @@
       (is (equals [3 7] (mmul m [1 1])))
       (is (equals [2 4] (get-column m 1))))))
 
+(deftest test-filter-slices
+  (is (equals [[1 2] [3 4]] (filter-slices numerical? [[1 2] [2 nil] [3 4]]))))
+
 (deftest test-emap
   (testing "basic"
     (is (equals [2 3] (emap inc [1 2]))))
@@ -217,7 +220,7 @@
 (deftest test-clamp
   (is (error? (clamp [[1 2] [3 4]] 6 1))))
 
-;; run complicance tests
+;; run compliance tests
 
 (deftest instance-tests
   (testing "empty persistent vectors are supported"
